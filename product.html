@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aston Martin - Final Experience</title>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; }
+        canvas { display: block; outline: none; cursor: grab; }
+        canvas:active { cursor: grabbing; }
+        
+        /* INTERFAZ FINAL LIMPIA */
+        #ui-panel {
+            position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+            background: rgba(10, 10, 10, 0.6); backdrop-filter: blur(8px);
+            padding: 12px 30px; border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex; gap: 20px; z-index: 10;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            transition: opacity 0.5s;
+        }
+
+        .color-btn {
+            width: 30px; height: 30px; border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.2); cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+        }
+        /* Indicador visual de selección */
+        .color-btn::after {
+            content: ''; position: absolute; top: -4px; left: -4px; right: -4px; bottom: -4px;
+            border-radius: 50%; border: 1px solid white; opacity: 0; transition: 0.3s;
+        }
+        .color-btn:hover { transform: scale(1.15); }
+        .color-btn.active { transform: scale(1.1); }
+        .color-btn.active::after { opacity: 1; top: -5px; left: -5px; right: -5px; bottom: -5px; }
+
+        #title {
+            position: absolute; top: 50px; width: 100%; text-align: center; color: white;
+            text-transform: uppercase; pointer-events: none; mix-blend-mode: exclusion;
+            opacity: 0; animation: fadeIn 2s 1s forwards;
+        }
+        h1 { margin: 0; font-weight: 300; font-size: 11px; letter-spacing: 12px; }
+
+        /* Loader Cinematográfico */
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100; display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 10px; letter-spacing: 4px; text-transform: uppercase;
+        }
+        
+        @keyframes fadeIn { to { opacity: 0.8; } }
+    </style>
+</head>
+<body>
+
+    <div id="loader">Preparando Experiencia...</div>
+
+    <div id="title">
+        <h1>Aston Martin // Cinematic Wet</h1>
+    </div>
+
+    <div id="ui-panel">
+        <div class="color-btn active" style="background: #600000;" data-color="#600000"></div> <div class="color-btn" style="background: #0a0a0a;" data-color="#0a0a0a"></div> <div class="color-btn" style="background: #808080;" data-color="#808080"></div> <div class="color-btn" style="background: #001a33;" data-color="#001a33"></div> <div class="color-btn" style="background: #5e4d25;" data-color="#5e4d25"></div> </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+        import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/loaders/GLTFLoader.js';
+        import { EffectComposer } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+        // --- CONFIGURACIÓN FINAL ---
+        const CONFIG = {
+            suelo: { roughness: 0.82, metalness: 0.74, normalScale: 2.0 },
+            luces: { techo: 3.1, spots: 0.5 },
+            auto: { envMap: 1.9, rotacion: 4.71 },
+            camara: { exposicion: 1.1, bloomStr: 1.5, bloomRad: 0.85 },
+            idleTime: 4000 // Tiempo en ms para activar cambio automático
+        };
+
+        // --- GESTIÓN DE COLORES Y ESTADO ---
+        const colorPalette = ['#600000', '#0a0a0a', '#808080', '#001a33', '#5e4d25'];
+        let currentColorIndex = 0; // Empieza en rojo
+        const targetColor = new THREE.Color(colorPalette[0]);
+        let lastInteractionTime = Date.now();
+        let isUserInteracting = false;
+        let paintableParts = [];
+
+        // --- 1. ESCENA ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#050505'); 
+        scene.fog = new THREE.FogExp2('#050505', 0.025);
+
+        const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 0.9, 12); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = CONFIG.camara.exposicion;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. SUELO ---
+        const texLoader = new THREE.TextureLoader();
+        const roughMap = texLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/roughness_map.jpg');
+        const normalMap = texLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/water/Water_1_M_Normal.jpg', () => {
+             // Ocultar loader con transición suave
+             const loaderEl = document.getElementById('loader');
+             loaderEl.style.opacity = '0';
+             setTimeout(() => loaderEl.remove(), 1000);
+        });
+        
+        roughMap.wrapS = roughMap.wrapT = normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
+        roughMap.repeat.set(4, 10); normalMap.repeat.set(4, 10);
+
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x0a0a0a, roughness: CONFIG.suelo.roughness, roughnessMap: roughMap, 
+            normalMap: normalMap, normalScale: new THREE.Vector2(CONFIG.suelo.normalScale, CONFIG.suelo.normalScale),
+            metalness: CONFIG.suelo.metalness, envMapIntensity: 1.0, transparent: true
+        });
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(30, 100), groundMat);
+        ground.rotation.x = -Math.PI / 2; ground.position.y = -0.01; ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- 3. TÚNEL ---
+        const tunnelGroup = new THREE.Group(); scene.add(tunnelGroup);
+        const neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        class SemicircleCurve extends THREE.Curve {
+            constructor(radius) { super(); this.radius = radius; }
+            getPoint(t, optionalTarget = new THREE.Vector3()) {
+                const angle = t * Math.PI;
+                return optionalTarget.set(this.radius * Math.cos(angle), this.radius * Math.sin(angle), 0);
+            }
+        }
+        for (let i = 0; i < 14; i++) {
+            const path = new SemicircleCurve(5.2);
+            const geometry = new THREE.TubeGeometry(path, 64, 0.12, 16, false);
+            const arch = new THREE.Mesh(geometry, neonMat);
+            arch.position.z = (i * 3) - 18; tunnelGroup.add(arch);
+        }
+
+        // --- 4. ILUMINACIÓN ---
+        const topLight = new THREE.RectAreaLight(0xffffff, CONFIG.luces.techo, 8, 20);
+        topLight.position.set(0, 6, -2); topLight.lookAt(0, 0, 0); scene.add(topLight);
+
+        const createSpot = (x) => {
+            const spot = new THREE.SpotLight(0xffffff, CONFIG.luces.spots);
+            spot.position.set(x, 2, 5); spot.angle = 0.5; spot.penumbra = 1; 
+            spot.lookAt(0, 0, 0); spot.castShadow = true; return spot;
+        };
+        scene.add(createSpot(-8)); scene.add(createSpot(8));
+
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        pmremGenerator.compileEquirectangularShader();
+        setTimeout(() => { scene.environment = pmremGenerator.fromScene(scene, 0.04).texture; }, 100);
+
+        // --- 5. COCHE ---
+        const loader = new GLTFLoader();
+        const paintMaterial = new THREE.MeshPhysicalMaterial({
+            color: targetColor, metalness: 0.7, roughness: 0.2, 
+            clearcoat: 1.0, clearcoatRoughness: 0.03, envMapIntensity: CONFIG.auto.envMap
+        });
+
+        loader.load('./aston_martin_db4_gt_zagato.glb', function (gltf) {
+            const carModel = gltf.scene;
+            carModel.rotation.y = CONFIG.auto.rotacion;
+            carModel.traverse((o) => {
+                if (o.isMesh) {
+                    o.castShadow = true; o.receiveShadow = true;
+                    if (o.name === 'Object_4' || (o.material && o.material.name === 'CP-Ferrari_Red')) {
+                        o.material = paintMaterial;
+                        paintableParts.push(o);
+                    }
+                }
+            });
+            const box = new THREE.Box3().setFromObject(carModel);
+            const size = new THREE.Vector3(); box.getSize(size);
+            const scaleFactor = 3.6 / Math.max(size.x, size.y, size.z);
+            carModel.scale.set(scaleFactor, scaleFactor, scaleFactor);
+            carModel.position.y = -box.min.y * scaleFactor;
+            
+            const carGroup = new THREE.Group(); carGroup.add(carModel); scene.add(carGroup);
+            const groupBox = new THREE.Box3().setFromObject(carGroup);
+            const center = new THREE.Vector3(); groupBox.getCenter(center);
+            carGroup.position.x = -center.x; carGroup.position.z = -center.z;
+        });
+
+        // --- 6. POST PROCESO ---
+        const composer = new EffectComposer(renderer);
+        const renderScene = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.2; bloomPass.strength = CONFIG.camara.bloomStr; bloomPass.radius = CONFIG.camara.bloomRad;
+        composer.addPass(renderScene); composer.addPass(bloomPass);
+
+        // --- 7. INTERACCIÓN Y LÓGICA AUTOMÁTICA ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.enablePan = false;
+        controls.minDistance = 8; controls.maxDistance = 15;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; 
+        controls.autoRotate = true; 
+        controls.autoRotateSpeed = 0.5;
+
+        // Función para actualizar la interfaz y el color objetivo
+        function selectColorByIndex(index) {
+            currentColorIndex = index;
+            const hex = colorPalette[index];
+            targetColor.set(hex);
+            
+            // Actualizar UI
+            const buttons = document.querySelectorAll('.color-btn');
+            buttons.forEach(b => b.classList.remove('active'));
+            buttons[index].classList.add('active');
+        }
+
+        // Detectar interacción del usuario
+        function onUserInteraction() {
+            lastInteractionTime = Date.now();
+            isUserInteracting = true;
+        }
+
+        // Event listeners para los botones de color
+        document.querySelectorAll('.color-btn').forEach((btn, index) => {
+            btn.addEventListener('click', (e) => {
+                onUserInteraction();
+                selectColorByIndex(index);
+            });
+        });
+
+        // Event listeners para el movimiento de cámara
+        controls.addEventListener('start', onUserInteraction);
+
+        // --- LOOP PRINCIPAL ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Lógica de Ciclo Automático
+            const timeSinceInteraction = Date.now() - lastInteractionTime;
+            if (timeSinceInteraction > CONFIG.idleTime) {
+                // Si ha pasado el tiempo de espera, el usuario ya no está interactuando activamente
+                isUserInteracting = false; 
+
+                // Resetear el timer para que ocurra de nuevo en 4 segundos
+                lastInteractionTime = Date.now(); 
+                
+                // Avanzar al siguiente color
+                let nextIndex = (currentColorIndex + 1) % colorPalette.length;
+                selectColorByIndex(nextIndex);
+            }
+
+            // Interpolación suave del color (siempre activa)
+            if (paintableParts.length > 0) {
+                paintableParts[0].material.color.lerp(targetColor, 0.05);
+            }
+
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
